@@ -56,7 +56,8 @@ def run_bash(command: str) -> str:
         return "Error: Dangerous command blocked"
     try:
         r = subprocess.run(command, shell=True, cwd=os.getcwd(),
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, encoding='utf-8',
+                           errors='replace', timeout=120)
         out = (r.stdout + r.stderr).strip()
         return out[:50000] if out else "(no output)"
     except subprocess.TimeoutExpired:
@@ -81,7 +82,7 @@ def agent_loop(messages: list):
             if block.type == "tool_use":
                 print(f"\033[33m$ {block.input['command']}\033[0m")
                 output = run_bash(block.input["command"])
-                print(output[:200])
+                print(output)
                 results.append({"type": "tool_result", "tool_use_id": block.id,
                                 "content": output})
         messages.append({"role": "user", "content": results})
@@ -98,6 +99,7 @@ if __name__ == "__main__":
             break
         history.append({"role": "user", "content": query})
         agent_loop(history)
+        print("=" * 60)
         response_content = history[-1]["content"]
         if isinstance(response_content, list):
             for block in response_content:

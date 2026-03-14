@@ -55,7 +55,8 @@ def run_bash(command: str) -> str:
         return "Error: Dangerous command blocked"
     try:
         r = subprocess.run(command, shell=True, cwd=WORKDIR,
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, encoding='utf-8',
+                           errors='replace', timeout=120)
         out = (r.stdout + r.stderr).strip()
         return out[:50000] if out else "(no output)"
     except subprocess.TimeoutExpired:
@@ -127,7 +128,9 @@ def run_subagent(prompt: str) -> str:
             if block.type == "tool_use":
                 handler = TOOL_HANDLERS.get(block.name)
                 output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)[:50000]})
+                print(f"\033[35m$ {block.name}\033[0m")
+                print(output)
+                results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
         sub_messages.append({"role": "user", "content": results})
     # Only the final text returns to the parent -- child context is discarded
     return "".join(b.text for b in response.content if hasattr(b, "text")) or "(no summary)"
@@ -154,12 +157,14 @@ def agent_loop(messages: list):
             if block.type == "tool_use":
                 if block.name == "task":
                     desc = block.input.get("description", "subtask")
-                    print(f"> task ({desc}): {block.input['prompt'][:80]}")
+                    print(f"\033[33m$ {block.name}\033[0m")
+                    print(f"> task ({desc}): {block.input['prompt']}")
                     output = run_subagent(block.input["prompt"])
                 else:
                     handler = TOOL_HANDLERS.get(block.name)
                     output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
-                print(f"  {str(output)[:200]}")
+                    print(f"\033[33m$ {block.name}\033[0m")
+                    print(output)
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
         messages.append({"role": "user", "content": results})
 
@@ -175,6 +180,7 @@ if __name__ == "__main__":
             break
         history.append({"role": "user", "content": query})
         agent_loop(history)
+        print("=" * 60)
         response_content = history[-1]["content"]
         if isinstance(response_content, list):
             for block in response_content:

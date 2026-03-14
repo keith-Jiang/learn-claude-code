@@ -2,13 +2,13 @@
 
 `s01 > [ s02 ] s03 > s04 > s05 > s06 | s07 > s08 > s09 > s10 > s11 > s12`
 
-> *"加一个工具, 只加一个 handler"* -- 循环不用动, 新工具注册进 dispatch map 就行。
+> *"加一个工具，只加一个 handler"*—— 循环不用动，新工具注册进 dispatch map 就行
 
 ## 问题
 
-只有 `bash` 时, 所有操作都走 shell。`cat` 截断不可预测, `sed` 遇到特殊字符就崩, 每次 bash 调用都是不受约束的安全面。专用工具 (`read_file`, `write_file`) 可以在工具层面做路径沙箱。
+只有 `bash` 时，所有操作都走 shell。`cat` 截断不可预测，`sed` 遇到特殊字符就崩，每次 bash 调用都是不受约束的安全面。专用工具 (`read_file, write_file`) 可以在工具层面做路径沙箱
 
-关键洞察: 加工具不需要改循环。
+关键洞察：**加工具不需要改循环**
 
 ## 解决方案
 
@@ -29,7 +29,7 @@ One lookup replaces any if/elif chain.
 
 ## 工作原理
 
-1. 每个工具有一个处理函数。路径沙箱防止逃逸工作区。
+1. 每个工具有一个处理函数，路径沙箱防止逃逸工作区
 
 ```python
 def safe_path(p: str) -> Path:
@@ -38,12 +38,52 @@ def safe_path(p: str) -> Path:
         raise ValueError(f"Path escapes workspace: {p}")
     return path
 
+
+def run_bash(command: str) -> str:
+    dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
+    if any(d in command for d in dangerous):
+        return "Error: Dangerous command blocked"
+    try:
+        r = subprocess.run(command, shell=True, cwd=WORKDIR,
+                           capture_output=True, text=True, encoding='utf-8',
+                           errors='replace', timeout=120)
+        out = (r.stdout + r.stderr).strip()
+        return out[:50000] if out else "(no output)"
+    except subprocess.TimeoutExpired:
+        return "Error: Timeout (120s)"
+
+
 def run_read(path: str, limit: int = None) -> str:
-    text = safe_path(path).read_text()
-    lines = text.splitlines()
-    if limit and limit < len(lines):
-        lines = lines[:limit]
-    return "\n".join(lines)[:50000]
+    try:
+        text = safe_path(path).read_text()
+        lines = text.splitlines()
+        if limit and limit < len(lines):
+            lines = lines[:limit] + [f"... ({len(lines) - limit} more lines)"]
+        return "\n".join(lines)[:50000]
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def run_write(path: str, content: str) -> str:
+    try:
+        fp = safe_path(path)
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(content)
+        return f"Wrote {len(content)} bytes to {path}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def run_edit(path: str, old_text: str, new_text: str) -> str:
+    try:
+        fp = safe_path(path)
+        content = fp.read_text()
+        if old_text not in content:
+            return f"Error: Text not found in {path}"
+        fp.write_text(content.replace(old_text, new_text, 1))
+        return f"Edited {path}"
+    except Exception as e:
+        return f"Error: {e}"
 ```
 
 2. dispatch map 将工具名映射到处理函数。
@@ -73,7 +113,9 @@ for block in response.content:
         })
 ```
 
-加工具 = 加 handler + 加 schema。循环永远不变。
+加工具 = 加 handler + 加 schema，循环永远不变
+
+> 输入 `Tools`，模型输出 `Tool Schema` 规定的内容，从 `Tool name -> Tool Handler` 找到对应函数，再将对应的 `Tool params -> Tool function`
 
 ## 相对 s01 的变更
 

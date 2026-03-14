@@ -133,7 +133,8 @@ def run_bash(command: str) -> str:
         return "Error: Dangerous command blocked"
     try:
         r = subprocess.run(command, shell=True, cwd=WORKDIR,
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, encoding='utf-8',
+                           errors='replace', timeout=120)
         out = (r.stdout + r.stderr).strip()
         return out[:50000] if out else "(no output)"
     except subprocess.TimeoutExpired:
@@ -219,7 +220,7 @@ def agent_loop(messages: list):
                         output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                     except Exception as e:
                         output = f"Error: {e}"
-                print(f"> {block.name}: {str(output)[:200]}")
+                print(f"> {block.name}: {str(output)}")
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
         messages.append({"role": "user", "content": results})
         # Layer 3: manual compact triggered by the compact tool
