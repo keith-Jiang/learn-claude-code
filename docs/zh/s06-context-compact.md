@@ -2,11 +2,11 @@
 
 `s01 > s02 > s03 > s04 > s05 > [ s06 ] | s07 > s08 > s09 > s10 > s11 > s12`
 
-> *"上下文总会满, 要有办法腾地方"* -- 三层压缩策略, 换来无限会话。
+> *"上下文总会满, 要有办法腾地方"*——三层压缩策略，换来无限会话
 
 ## 问题
 
-上下文窗口是有限的。读一个 1000 行的文件就吃掉 ~4000 token; 读 30 个文件、跑 20 条命令, 轻松突破 100k token。不压缩, 智能体根本没法在大项目里干活。
+上下文窗口是有限的，读一个 1000 行的文件就吃掉约 4000 token；读 30 个文件、跑 20 条命令，轻松突破 100k token。不压缩，智能体根本没法在大项目里干活
 
 ## 解决方案
 
@@ -42,7 +42,7 @@ continue    [Layer 2: auto_compact]
 
 ## 工作原理
 
-1. **第一层 -- micro_compact**: 每次 LLM 调用前, 将旧的 tool result 替换为占位符。
+1. **第一层——`micro_compact`**：每次 LLM 调用前，将旧的 `tool_result` 替换为占位符
 
 ```python
 def micro_compact(messages: list) -> list:
@@ -60,7 +60,35 @@ def micro_compact(messages: list) -> list:
     return messages
 ```
 
-2. **第二层 -- auto_compact**: token 超过阈值时, 保存完整对话到磁盘, 让 LLM 做摘要。
+> 示例：
+>
+> ```bash
+>  1. User 输入
+>      {"role": "user", "content": "读文件和执行命令"}
+> 
+>   2. Assistant 响应（调用工具）
+>      {"role": "assistant", "content": [
+>          {"type": "tool_use", "id": "id_1", "name": "read_file", "input": {...}},
+>          {"type": "tool_use", "id": "id_2", "name": "bash", "input": {...}}
+>      ]}
+> 
+>   3. User 返回工具结果
+>      {"role": "user", "content": [
+>          {"type": "tool_result", "tool_use_id": "id_1", "content": "文件内容..."},
+>          {"type": "tool_result", "tool_use_id": "id_2", "content": "命令输出..."}
+>      ]}
+> 
+>   micro_compact 处理后
+> 
+>   如果工具结果太多，旧的会被替换成：
+>   {
+>       "type": "tool_result",
+>       "tool_use_id": "id_1",
+>       "content": "[Previous: used read_file]"  # ← 原来的长内容被替换了
+>   }
+> ```
+
+2. **第二层——auto_compact**：token 超过阈值时，保存完整对话到磁盘，让 LLM 做总结
 
 ```python
 def auto_compact(messages: list) -> list:
@@ -83,7 +111,7 @@ def auto_compact(messages: list) -> list:
     ]
 ```
 
-3. **第三层 -- manual compact**: `compact` 工具按需触发同样的摘要机制。
+3. **第三层——manual compact**：`compact` 工具按需触发同样的总结机制
 
 4. 循环整合三层:
 
@@ -99,7 +127,7 @@ def agent_loop(messages: list):
             messages[:] = auto_compact(messages)       # Layer 3
 ```
 
-完整历史通过 transcript 保存在磁盘上。信息没有真正丢失, 只是移出了活跃上下文。
+完整历史通过 transcript 保存在磁盘上。信息没有真正丢失，只是移出了活跃上下文。
 
 ## 相对 s05 的变更
 

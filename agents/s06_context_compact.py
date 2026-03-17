@@ -100,10 +100,10 @@ def auto_compact(messages: list) -> list:
     transcript_path = TRANSCRIPT_DIR / f"transcript_{int(time.time())}.jsonl"
     with open(transcript_path, "w") as f:
         for msg in messages:
-            f.write(json.dumps(msg, default=str) + "\n")
+            f.write(json.dumps(msg, default=str, ensure_ascii=False) + "\n")
     print(f"[transcript saved: {transcript_path}]")
     # Ask LLM to summarize
-    conversation_text = json.dumps(messages, default=str)[:80000]
+    conversation_text = json.dumps(messages, default=str, ensure_ascii=False)[:80000]
     response = client.messages.create(
         model=MODEL,
         messages=[{"role": "user", "content":
@@ -220,7 +220,8 @@ def agent_loop(messages: list):
                         output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                     except Exception as e:
                         output = f"Error: {e}"
-                print(f"> {block.name}: {str(output)}")
+                print(f"\033[33m$ {block.name}\033[0m")
+                print(output)
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
         messages.append({"role": "user", "content": results})
         # Layer 3: manual compact triggered by the compact tool
@@ -240,6 +241,7 @@ if __name__ == "__main__":
             break
         history.append({"role": "user", "content": query})
         agent_loop(history)
+        print("=" * 60)
         response_content = history[-1]["content"]
         if isinstance(response_content, list):
             for block in response_content:

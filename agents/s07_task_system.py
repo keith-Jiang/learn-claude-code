@@ -61,7 +61,7 @@ class TaskManager:
 
     def _save(self, task: dict):
         path = self.dir / f"task_{task['id']}.json"
-        path.write_text(json.dumps(task, indent=2))
+        path.write_text(json.dumps(task, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def create(self, subject: str, description: str = "") -> str:
         task = {
@@ -70,10 +70,10 @@ class TaskManager:
         }
         self._save(task)
         self._next_id += 1
-        return json.dumps(task, indent=2)
+        return json.dumps(task, indent=2, ensure_ascii=False)
 
     def get(self, task_id: int) -> str:
-        return json.dumps(self._load(task_id), indent=2)
+        return json.dumps(self._load(task_id), indent=2, ensure_ascii=False)
 
     def update(self, task_id: int, status: str = None,
                add_blocked_by: list = None, add_blocks: list = None) -> str:
@@ -99,7 +99,7 @@ class TaskManager:
                 except ValueError:
                     pass
         self._save(task)
-        return json.dumps(task, indent=2)
+        return json.dumps(task, indent=2, ensure_ascii=False)
 
     def _clear_dependency(self, completed_id: int):
         """Remove completed_id from all other tasks' blockedBy lists."""
@@ -117,7 +117,7 @@ class TaskManager:
             return "No tasks."
         lines = []
         for t in tasks:
-            marker = {"pending": "[ ]", "in_progress": "[>]", "completed": "[x]"}.get(t["status"], "[?]")
+            marker = {"pending": "[ ]", "in_progress": "[-]", "completed": "[√]"}.get(t["status"], "[?]")
             blocked = f" (blocked by: {t['blockedBy']})" if t.get("blockedBy") else ""
             lines.append(f"{marker} #{t['id']}: {t['subject']}{blocked}")
         return "\n".join(lines)
@@ -138,8 +138,9 @@ def run_bash(command: str) -> str:
     if any(d in command for d in dangerous):
         return "Error: Dangerous command blocked"
     try:
-        r = subprocess.run(command, shell=True, cwd=WORKDIR,
-                           capture_output=True, text=True, timeout=120)
+        r = subprocess.run(command, shell=True, cwd=os.getcwd(),
+                           capture_output=True, text=True, encoding='utf-8',
+                           errors='replace', timeout=120)
         out = (r.stdout + r.stderr).strip()
         return out[:50000] if out else "(no output)"
     except subprocess.TimeoutExpired:
@@ -223,7 +224,8 @@ def agent_loop(messages: list):
                     output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                 except Exception as e:
                     output = f"Error: {e}"
-                print(f"> {block.name}: {str(output)[:200]}")
+                print(f"\033[33m$ {block.name}\033[0m")
+                print(output)
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
         messages.append({"role": "user", "content": results})
 
@@ -239,6 +241,7 @@ if __name__ == "__main__":
             break
         history.append({"role": "user", "content": query})
         agent_loop(history)
+        print("=" * 60)
         response_content = history[-1]["content"]
         if isinstance(response_content, list):
             for block in response_content:
