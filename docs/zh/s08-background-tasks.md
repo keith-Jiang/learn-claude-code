@@ -2,11 +2,11 @@
 
 `s01 > s02 > s03 > s04 > s05 > s06 | s07 > [ s08 ] s09 > s10 > s11 > s12`
 
-> *"慢操作丢后台, agent 继续想下一步"* -- 后台线程跑命令, 完成后注入通知。
+> *"慢操作丢后台，agent 继续想下一步"*——后台线程跑命令，完成后注入通知
 
 ## 问题
 
-有些命令要跑好几分钟: `npm install`、`pytest`、`docker build`。阻塞式循环下模型只能干等。用户说 "装依赖, 顺便建个配置文件", 智能体却只能一个一个来。
+有些命令要跑好几分钟：`npm install`、`pytest`、`docker build`。阻塞式循环下模型只能干等。用户说 "装依赖，顺便建个配置文件"，智能体却只能一个一个来
 
 ## 解决方案
 
@@ -15,7 +15,7 @@ Main thread                Background thread
 +-----------------+        +-----------------+
 | agent loop      |        | subprocess runs |
 | ...             |        | ...             |
-| [LLM call] <---+------- | enqueue(result) |
+| [LLM call] <---+-------  | enqueue(result) |
 |  ^drain queue   |        +-----------------+
 +-----------------+
 
@@ -30,44 +30,60 @@ Agent --[spawn A]--[spawn B]--[other work]----
 
 ## 工作原理
 
-1. BackgroundManager 用线程安全的通知队列追踪任务。
+1. `BackgroundManager` 用线程安全的通知队列追踪任务
 
 ```python
 class BackgroundManager:
     def __init__(self):
-        self.tasks = {}
-        self._notification_queue = []
+        self.tasks = {}  # task_id -> {status, result, command}
+        self._notification_queue = []  # completed task results
         self._lock = threading.Lock()
 ```
 
-2. `run()` 启动守护线程, 立即返回。
+2. `run()` 启动守护线程，立即返回
 
 ```python
 def run(self, command: str) -> str:
-    task_id = str(uuid.uuid4())[:8]
-    self.tasks[task_id] = {"status": "running", "command": command}
+    """Start a background thread, return task_id immediately."""
+    task_id = str(uuid.uuid4())[:8] # 生成一个随机的任务ID
+    self.tasks[task_id] = {"status": "running", "result": None, "command": command} # 将任务ID与任务状态、结果和命令关联起来
     thread = threading.Thread(
-        target=self._execute, args=(task_id, command), daemon=True)
-    thread.start()
-    return f"Background task {task_id} started"
+        target=self._execute, args=(task_id, command), daemon=True
+    )
+    thread.start() # 启动线程
+    return f"Background task {task_id} started: {command[:80]}"
 ```
 
-3. 子进程完成后, 结果进入通知队列。
+3. 子进程完成后，结果进入通知队列
 
 ```python
-def _execute(self, task_id, command):
+def _execute(self, task_id: str, command: str):
+    """Thread target: run subprocess, capture output, push to queue."""
     try:
-        r = subprocess.run(command, shell=True, cwd=WORKDIR,
-            capture_output=True, text=True, timeout=300)
+        r = subprocess.run(
+            command, shell=True, cwd=WORKDIR,
+            capture_output=True, text=True, timeout=300
+        )
         output = (r.stdout + r.stderr).strip()[:50000]
+        status = "completed"
     except subprocess.TimeoutExpired:
         output = "Error: Timeout (300s)"
+        status = "timeout"
+    except Exception as e:
+        output = f"Error: {e}"
+        status = "error"
+    self.tasks[task_id]["status"] = status
+    self.tasks[task_id]["result"] = output or "(no output)"
     with self._lock:
         self._notification_queue.append({
-            "task_id": task_id, "result": output[:500]})
+            "task_id": task_id,
+            "status": status,
+            "command": command[:80],
+            "result": (output or "(no output)")[:500],
+        })
 ```
 
-4. 每次 LLM 调用前排空通知队列。
+4. 每次 LLM 调用前排空通知队列
 
 ```python
 def agent_loop(messages: list):
@@ -84,7 +100,7 @@ def agent_loop(messages: list):
         response = client.messages.create(...)
 ```
 
-循环保持单线程。只有子进程 I/O 被并行化。
+循环保持单线程。只有子进程 I/O 被并行化
 
 ## 相对 s07 的变更
 

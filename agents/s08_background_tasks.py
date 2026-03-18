@@ -9,7 +9,7 @@ before each LLM call to deliver results.
     +-----------------+        +-----------------+
     | agent loop      |        | task executes   |
     | ...             |        | ...             |
-    | [LLM call] <---+------- | enqueue(result) |
+    | [LLM call] <---+-------  | enqueue(result) |
     |  ^drain queue   |        +-----------------+
     +-----------------+
 
@@ -54,12 +54,12 @@ class BackgroundManager:
 
     def run(self, command: str) -> str:
         """Start a background thread, return task_id immediately."""
-        task_id = str(uuid.uuid4())[:8]
-        self.tasks[task_id] = {"status": "running", "result": None, "command": command}
+        task_id = str(uuid.uuid4())[:8] # 生成一个随机的任务ID
+        self.tasks[task_id] = {"status": "running", "result": None, "command": command} # 将任务ID与任务状态、结果和命令关联起来
         thread = threading.Thread(
             target=self._execute, args=(task_id, command), daemon=True
         )
-        thread.start()
+        thread.start() # 启动线程
         return f"Background task {task_id} started: {command[:80]}"
 
     def _execute(self, task_id: str, command: str):
@@ -123,7 +123,8 @@ def run_bash(command: str) -> str:
         return "Error: Dangerous command blocked"
     try:
         r = subprocess.run(command, shell=True, cwd=WORKDIR,
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, encoding='utf-8',
+                           errors='replace', timeout=120)
         out = (r.stdout + r.stderr).strip()
         return out[:50000] if out else "(no output)"
     except subprocess.TimeoutExpired:
@@ -209,7 +210,8 @@ def agent_loop(messages: list):
                     output = handler(**block.input) if handler else f"Unknown tool: {block.name}"
                 except Exception as e:
                     output = f"Error: {e}"
-                print(f"> {block.name}: {str(output)[:200]}")
+                print(f"\033[33m$ {block.name}\033[0m")
+                print(output)
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
         messages.append({"role": "user", "content": results})
 
@@ -225,6 +227,7 @@ if __name__ == "__main__":
             break
         history.append({"role": "user", "content": query})
         agent_loop(history)
+        print("=" * 60)
         response_content = history[-1]["content"]
         if isinstance(response_content, list):
             for block in response_content:
